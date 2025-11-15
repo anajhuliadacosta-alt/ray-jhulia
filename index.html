@@ -1,0 +1,240 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Lista de Presentes - Chá de Panela</title>
+  <style>
+    body{font-family:Arial,Helvetica,sans-serif;background:#f5f5f5;margin:0;padding:20px}
+    .container{max-width:1000px;margin:0 auto}
+    .card{background:#fff;padding:16px;border-radius:10px;box-shadow:0 4px 12px rgba(0,0,0,0.05);margin-bottom:16px}
+    input, select{padding:10px;border-radius:8px;border:1px solid #ddd;font-size:14px}
+    button{padding:8px 12px;border-radius:8px;border:none;background:#6c5ce7;color:#fff;cursor:pointer}
+    button.secondary{background:#efefef;color:#333}
+    .layout{display:grid;grid-template-columns:320px 1fr;gap:16px}
+    .present-list{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:12px}
+    .present{display:flex;gap:12px;align-items:center;padding:12px;border-radius:10px;background:#fff;border:1px solid #f0f0f0}
+    .present img{width:72px;height:72px;object-fit:cover;border-radius:8px;background:#f0f0f0}
+    .meta{flex:1}
+    .meta h3{margin:0 0 6px 0;font-size:1rem}
+    .meta p{margin:0;color:#666;font-size:0.9rem}
+    .reserved{color:#c0392b;font-weight:700}
+    .available{color:#27ae60;font-weight:700}
+    @media (max-width:900px){.layout{grid-template-columns:1fr}}
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>Lista de Presentes - Chá de Panela</h1>
+
+    <!-- Login / Admin info -->
+    <div id="login-card" class="card">
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap">
+        <div>
+          <h3 style="margin:0">Área Administrativa</h3>
+          <div style="color:#666;font-size:0.95rem">Faça login para gerenciar itens e ver quem reservou.</div>
+        </div>
+        <div style="display:flex;gap:8px;align-items:center">
+          <input id="admin-pass" type="password" placeholder="Senha do admin" />
+          <button onclick="loginAdmin()">Entrar</button>
+          <button id="btn-logout" class="secondary" onclick="logoutAdmin()" style="display:none">Sair</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="layout">
+      <!-- Admin column -->
+      <div>
+        <div id="admin-panel" class="card" style="display:none">
+          <h3 style="margin-top:0">Adicionar Presente</h3>
+          <div style="display:flex;flex-direction:column;gap:10px">
+            <input id="new-name" type="text" placeholder="Nome do presente" />
+            <select id="new-category">
+              <option value="Cozinha">Cozinha</option>
+              <option value="Mesa e Banho">Mesa e Banho</option>
+              <option value="Decoração">Decoração</option>
+              <option value="Limpeza">Limpeza</option>
+              <option value="Outros">Outros</option>
+            </select>
+            <input id="new-image" type="file" accept="image/*" />
+            <div style="display:flex;gap:8px">
+              <button onclick="addPresent()">Adicionar</button>
+              <button class="secondary" onclick="clearAll()">Limpar tudo</button>
+            </div>
+        </div>
+        </div>
+
+        <!-- Edit panel (admin only) -->
+        <div id="edit-panel" class="card" style="display:none">
+          <h3 style="margin-top:0">Editar Presente</h3>
+          <input type="hidden" id="edit-id" />
+          <div style="display:flex;flex-direction:column;gap:10px">
+            <input id="edit-name" type="text" placeholder="Nome" />
+            <input id="edit-image" type="file" accept="image/*" />
+            <div style="display:flex;gap:8px">
+              <button onclick="saveEdit()">Salvar alterações</button>
+              <button class="secondary" onclick="cancelEdit()">Cancelar</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Guests column: filters + list -->
+      <div>
+        <div class="card" style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap">
+          <div style="display:flex;gap:8px;align-items:center">
+            <label for="filter-category" style="color:#666">Filtrar:</label>
+            <select id="filter-category" onchange="render()">
+              <option value="all">Todas as categorias</option>
+              <option value="Cozinha">Cozinha</option>
+              <option value="Mesa e Banho">Mesa e Banho</option>
+              <option value="Decoração">Decoração</option>
+              <option value="Limpeza">Limpeza</option>
+              <option value="Outros">Outros</option>
+            </select>
+          </div>
+          <div style="color:#666">Convidados podem reservar. Admin vê quem reservou.</div>
+        </div>
+
+        <div id="present-list" class="present-list" style="margin-top:12px"></div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // Config
+    const ADMIN_PASSWORD = '1234';
+    let isAdmin = false;
+    let editingId = null;
+
+    // Initial sample data if empty (you can replace with your full list later)
+    const SAMPLE = [
+      { id: 1, name: 'Jogo de pratos', category: 'Mesa e Banho', image: '', reserved:false, reservedBy: '' },
+      { id: 2, name: 'Airfryer', category: 'Cozinha', image: '', reserved:false, reservedBy: '' },
+      { id: 3, name: 'Jogo de copos', category: 'Mesa e Banho', image: '', reserved:false, reservedBy: '' }
+    ];
+
+    let presents = [];
+    try{
+      const s = localStorage.getItem('presents');
+      presents = s ? JSON.parse(s) : SAMPLE.slice();
+    }catch(e){ presents = SAMPLE.slice(); }
+
+    // Utilities
+    function save(){ localStorage.setItem('presents', JSON.stringify(presents)); }
+
+    // Render
+    function render(){
+      const container = document.getElementById('present-list');
+      container.innerHTML = '';
+      const filter = document.getElementById('filter-category')?.value || 'all';
+
+      presents.filter(p => filter === 'all' || p.category === filter).forEach(p => {
+        const card = document.createElement('div');
+        card.className = 'present card-present present';
+
+        const img = document.createElement('img');
+        img.src = p.image || 'data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="72" height="72"><rect width="100%" height="100%" fill="%23f0f0f0"/></svg>';
+
+        const meta = document.createElement('div');
+        meta.className = 'meta';
+        const title = document.createElement('h3'); title.textContent = p.name;
+        const cat = document.createElement('p'); cat.textContent = p.category;
+        meta.appendChild(title); meta.appendChild(cat);
+
+        const actions = document.createElement('div');
+
+        // Admin edit button
+        if(isAdmin){
+          const btnEdit = document.createElement('button');
+          btnEdit.textContent = 'Editar';
+          btnEdit.style.marginBottom = '8px';
+          btnEdit.onclick = () => openEdit(p.id);
+          actions.appendChild(btnEdit);
+        }
+
+        // Reservation area
+        if(p.reserved){
+          const span = document.createElement('div');
+          span.className = 'reserved';
+          span.textContent = isAdmin ? `Reservado por: ${p.reservedBy}` : 'Reservado';
+          actions.appendChild(span);
+        } else {
+          const btnReserve = document.createElement('button');
+          btnReserve.textContent = 'Reservar';
+          btnReserve.onclick = () => reserve(p.id);
+          actions.appendChild(btnReserve);
+        }
+
+        card.appendChild(img); card.appendChild(meta); card.appendChild(actions);
+        container.appendChild(card);
+      });
+    }
+
+    // Add present (admin)
+    function addPresent(){
+      const name = document.getElementById('new-name').value.trim();
+      const category = document.getElementById('new-category').value;
+      const file = document.getElementById('new-image').files[0];
+      if(!name){ alert('Digite o nome do presente'); return; }
+
+      if(file){
+        const r = new FileReader();
+        r.onload = e => {
+          presents.push({ id: Date.now(), name, category, image: e.target.result, reserved:false, reservedBy: '' });
+          save(); render();
+          document.getElementById('new-name').value = '';
+          document.getElementById('new-image').value = '';
+        };
+        r.readAsDataURL(file);
+      } else {
+        presents.push({ id: Date.now(), name, category, image: '', reserved:false, reservedBy: '' });
+        save(); render();
+        document.getElementById('new-name').value = '';
+      }
+    }
+
+    // Reserve (guest)
+    function reserve(id){
+      const name = prompt('Seu nome para reservar:');
+      if(!name) return;
+      const p = presents.find(x=>x.id===id);
+      if(!p) return;
+      p.reserved = true; p.reservedBy = name; save(); render();
+    }
+
+    // Admin login/logout
+    function loginAdmin(){
+      const pass = document.getElementById('admin-pass').value;
+      if(pass === ADMIN_PASSWORD){
+        isAdmin = true; document.getElementById('admin-panel').style.display = 'block';
+        document.getElementById('btn-logout').style.display = 'inline-block';
+        document.getElementById('login-card').style.display = 'none';
+        render();
+      } else alert('Senha incorreta!');
+    }
+    function logoutAdmin(){ isAdmin = false; document.getElementById('admin-panel').style.display = 'none'; document.getElementById('btn-logout').style.display = 'none'; document.getElementById('login-card').style.display = 'block'; document.getElementById('admin-pass').value=''; document.getElementById('edit-panel').style.display='none'; render(); }
+
+    // Clear all
+    function clearAll(){ if(!confirm('Limpar todos os presentes?')) return; presents=[]; save(); render(); }
+
+    // === EDITING (admin) ===
+    function openEdit(id){
+      const p = presents.find(x=>x.id===id); if(!p) return;
+      editingId = id; document.getElementById('edit-id').value = id; document.getElementById('edit-name').value = p.name; document.getElementById('edit-image').value = ''; document.getElementById('edit-panel').style.display = 'block'; window.scrollTo({top:0,behavior:'smooth'});
+    }
+    function cancelEdit(){ editingId=null; document.getElementById('edit-panel').style.display='none'; }
+    function saveEdit(){
+      const newName = document.getElementById('edit-name').value.trim();
+      const file = document.getElementById('edit-image').files[0];
+      if(!newName){ alert('Nome não pode ficar vazio'); return; }
+      const p = presents.find(x=>x.id===editingId); if(!p) return;
+      p.name = newName;
+      if(file){ const r=new FileReader(); r.onload = e=>{ p.image = e.target.result; save(); render(); document.getElementById('edit-panel').style.display='none'; }; r.readAsDataURL(file); } else { save(); render(); document.getElementById('edit-panel').style.display='none'; }
+    }
+
+    // initial render
+    render();
+  </script>
+</body>
+</html>
