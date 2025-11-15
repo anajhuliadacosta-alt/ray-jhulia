@@ -1,0 +1,290 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Lista de Presentes - Chá de Panela</title>
+  <style>
+    body{font-family:Arial,Helvetica,sans-serif;background:#f5f5f5;margin:0;padding:20px}
+    .container{max-width:1000px;margin:0 auto}
+    .card{background:#fff;padding:16px;border-radius:10px;box-shadow:0 4px 12px rgba(0,0,0,0.05);margin-bottom:16px}
+    input, select{padding:10px;border-radius:8px;border:1px solid #ddd;font-size:14px}
+    button{padding:8px 12px;border-radius:8px;border:none;background:#6c5ce7;color:#fff;cursor:pointer}
+    button.secondary{background:#efefef;color:#333}
+    .layout{display:grid;grid-template-columns:320px 1fr;gap:16px}
+    .present-list{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:12px}
+    .present{display:flex;gap:12px;align-items:center;padding:12px;border-radius:10px;background:#fff;border:1px solid #f0f0f0}
+    .present img{width:72px;height:72px;object-fit:cover;border-radius:8px;background:#f0f0f0}
+    .meta{flex:1}
+    .meta h3{margin:0 0 6px 0;font-size:1rem}
+    .meta p{margin:0;color:#666;font-size:0.9rem}
+    .reserved{color:#c0392b;font-weight:700}
+    .available{color:#27ae60;font-weight:700}
+    #edit-preview{width:120px;height:120px;object-fit:cover;border-radius:10px;background:#eee;margin-top:8px}
+    @media (max-width:900px){.layout{grid-template-columns:1fr}}
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>Lista de Presentes - Chá de Panela</h1>
+
+    <div id="login-card" class="card">
+      <h3>Área Administrativa</h3>
+      <p style="color:#666">Faça login para gerenciar itens.</p>
+      <input id="admin-pass" type="password" placeholder="Senha do admin" />
+      <input id="admin-token" type="password" placeholder="Token do GitHub (apenas admin)" />
+      <button id="btn-login">Entrar</button>
+      <button id="btn-logout" class="secondary" style="display:none">Sair</button>
+    </div>
+
+    <div class="layout">
+      <div>
+        <div id="admin-panel" class="card" style="display:none">
+          <h3>Adicionar Presente</h3>
+          <input id="new-name" type="text" placeholder="Nome do presente" />
+          <select id="new-category">
+            <option value="Cozinha">Cozinha</option>
+            <option value="Mesa e Banho">Mesa e Banho</option>
+            <option value="Decoração">Decoração</option>
+            <option value="Limpeza">Limpeza</option>
+            <option value="Outros">Outros</option>
+          </select>
+          <input id="new-image" type="file" accept="image/*" />
+          <button id="btn-add">Adicionar</button>
+        </div>
+
+        <div id="edit-panel" class="card" style="display:none">
+          <h3>Editar Presente</h3>
+          <input type="hidden" id="edit-id" />
+          <input id="edit-name" type="text" placeholder="Nome" />
+          <input id="edit-image" type="file" accept="image/*" />
+          <img id="edit-preview" src="" alt="Prévia" />
+          <div style="margin-top:10px">
+            <button id="btn-save-edit">Salvar</button>
+            <button id="btn-cancel-edit" class="secondary">Cancelar</button>
+          </div>
+        </div>
+      </div>
+
+      <div>
+        <div class="card">
+          <label>Filtrar:</label>
+          <select id="filter-category">
+            <option value="all">Todas</option>
+            <option value="Cozinha">Cozinha</option>
+            <option value="Mesa e Banho">Mesa e Banho</option>
+            <option value="Decoração">Decoração</option>
+            <option value="Limpeza">Limpeza</option>
+            <option value="Outros">Outros</option>
+          </select>
+        </div>
+        <div id="present-list" class="present-list"></div>
+      </div>
+    </div>
+  </div>
+
+<script>
+// CONFIG
+const ADMIN_PASSWORD = '1234';
+const USER = 'anajhuliadacosta-alt';
+const REPO = 'ray-jhulia';
+const FILE = 'presents.json';
+
+// STATE
+let TOKEN = '';
+let isAdmin = false;
+let presents = [];
+let editingId = null;
+
+// ---------- RENDER (defined early so any calls are safe) ----------
+function render(){
+  const list = document.getElementById('present-list');
+  if(!list) return;
+  list.innerHTML = '';
+  const filterEl = document.getElementById('filter-category');
+  const filter = filterEl ? filterEl.value : 'all';
+
+  presents.filter(p=>filter==='all'||p.category===filter).forEach(p=>{
+    const card = document.createElement('div');
+    card.className = 'present';
+
+    const img = document.createElement('img');
+    img.src = p.image || 'https://via.placeholder.com/72';
+
+    const meta = document.createElement('div');
+    meta.className = 'meta';
+    meta.innerHTML = `<h3>${escapeHtml(p.name)}</h3><p>${escapeHtml(p.category)}</p>`;
+
+    const actions = document.createElement('div');
+
+    if(isAdmin){
+      const b = document.createElement('button');
+      b.textContent = 'Editar';
+      b.onclick = ()=>openEdit(p.id);
+      actions.appendChild(b);
+    }
+
+    if(p.reserved){
+      const span = document.createElement('div');
+      span.className = 'reserved';
+      span.textContent = isAdmin?`Reservado por: ${p.reservedBy}`:'Reservado';
+      actions.appendChild(span);
+    } else {
+      const b = document.createElement('button');
+      b.textContent = 'Reservar';
+      b.onclick = ()=>reserve(p.id);
+      actions.appendChild(b);
+    }
+
+    card.appendChild(img);
+    card.appendChild(meta);
+    card.appendChild(actions);
+    list.appendChild(card);
+  });
+}
+
+// ---------- HELPERS ----------
+function escapeHtml(str){
+  return String(str||'').replace(/[&<>"']/g, s => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":"&#39;"})[s]);
+}
+
+async function fetchJSON(){
+  try{
+    const url = `https://raw.githubusercontent.com/${USER}/${REPO}/main/${FILE}`;
+    const res = await fetch(url + '?t=' + Date.now());
+    if(!res.ok) return [];
+    return await res.json();
+  }catch(e){ console.warn('fetchJSON error',e); return []; }
+}
+
+async function uploadJSON(data){
+  if(!TOKEN) throw new Error('No token');
+  const getUrl = `https://api.github.com/repos/${USER}/${REPO}/contents/${FILE}`;
+
+  // get current sha (file may not exist yet)
+  const currentRes = await fetch(getUrl, { headers:{ Authorization:`Bearer ${TOKEN}` } });
+  let sha = undefined;
+  if(currentRes.ok){
+    const cur = await currentRes.json();
+    sha = cur.sha;
+  }
+
+  const body = {
+    message: 'update presents.json via web UI',
+    content: btoa(unescape(encodeURIComponent(JSON.stringify(data, null, 2))))
+  };
+  if(sha) body.sha = sha;
+
+  const putRes = await fetch(getUrl,{
+    method:'PUT',
+    headers:{ 'Authorization':`Bearer ${TOKEN}`, 'Content-Type':'application/json' },
+    body: JSON.stringify(body)
+  });
+  if(!putRes.ok){
+    const txt = await putRes.text();
+    throw new Error('Upload failed: '+txt);
+  }
+}
+
+function toBase64(file){
+  return new Promise((res, rej)=>{
+    const r = new FileReader();
+    r.onload = e=>res(e.target.result);
+    r.onerror = e=>rej(e);
+    r.readAsDataURL(file);
+  });
+}
+
+// ---------- ACTIONS ----------
+async function init(){
+  presents = await fetchJSON();
+  render();
+}
+
+async function loginAdmin(){
+  const pass = document.getElementById('admin-pass').value;
+  const tokenInput = document.getElementById('admin-token').value;
+  if(pass === ADMIN_PASSWORD && tokenInput && tokenInput.length>20){
+    TOKEN = tokenInput;
+    isAdmin = true;
+    document.getElementById('admin-panel').style.display='block';
+    document.getElementById('btn-logout').style.display='inline-block';
+    document.getElementById('login-card').style.display='none';
+    render();
+  } else {
+    alert('Senha ou token incorretos');
+  }
+}
+function logoutAdmin(){ isAdmin=false; TOKEN=''; location.reload(); }
+
+async function addPresent(){
+  const name = document.getElementById('new-name').value.trim();
+  const category = document.getElementById('new-category').value;
+  const file = document.getElementById('new-image').files[0];
+  if(!name){ alert('Digite o nome do presente'); return; }
+  let img = '';
+  if(file) img = await toBase64(file);
+  presents.push({ id: Date.now(), name, category, image: img, reserved: false, reservedBy: '' });
+  try{ await uploadJSON(presents); await init(); }
+  catch(e){ alert('Erro ao salvar: '+e.message); }
+}
+
+async function reserve(id){
+  const name = prompt('Seu nome:'); if(!name) return;
+  const p = presents.find(x=>x.id===id);
+  if(!p) return;
+  p.reserved = true; p.reservedBy = name;
+  try{ await uploadJSON(presents); await init(); }
+  catch(e){ alert('Erro ao reservar: '+e.message); }
+}
+
+function openEdit(id){
+  const p = presents.find(x=>x.id===id); if(!p) return;
+  editingId = id;
+  document.getElementById('edit-id').value = id;
+  document.getElementById('edit-name').value = p.name;
+  document.getElementById('edit-preview').src = p.image || '';
+  document.getElementById('edit-image').value = '';
+  document.getElementById('edit-panel').style.display = 'block';
+}
+
+function cancelEdit(){ editingId = null; document.getElementById('edit-panel').style.display='none'; }
+
+async function saveEdit(){
+  const p = presents.find(x=>x.id===editingId);
+  if(!p) return alert('Presente não encontrado');
+  const newName = document.getElementById('edit-name').value.trim();
+  if(!newName) return alert('Nome não pode ficar vazio');
+  const file = document.getElementById('edit-image').files[0];
+  p.name = newName;
+  if(file){ p.image = await toBase64(file); }
+  try{ await uploadJSON(presents); await init(); document.getElementById('edit-panel').style.display='none'; }
+  catch(e){ alert('Erro ao salvar edição: '+e.message); }
+}
+
+// preview when selecting image in edit
+const editImageInput = document.getElementById('edit-image');
+if(editImageInput){
+  editImageInput.addEventListener('change', function(e){
+    const file = e.target.files[0];
+    if(file){
+      const reader = new FileReader();
+      reader.onload = ()=>{ document.getElementById('edit-preview').src = reader.result; };
+      reader.readAsDataURL(file);
+    }
+  });
+}
+
+// wire up buttons and events AFTER functions are defined
+document.getElementById('btn-login').addEventListener('click', loginAdmin);
+document.getElementById('btn-logout').addEventListener('click', logoutAdmin);
+document.getElementById('btn-add').addEventListener('click', addPresent);
+document.getElementById('btn-save-edit').addEventListener('click', saveEdit);
+document.getElementById('btn-cancel-edit').addEventListener('click', cancelEdit);
+document.getElementById('filter-category').addEventListener('change', render);
+
+// initial load
+init();
+</script>
+</body>
+</html>
